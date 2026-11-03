@@ -4,9 +4,308 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Gymkana ciudadana de Rivas</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  >
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      color: #222;
+    }
+
+    #map {
+      height: 100vh;
+      width: 100%;
+    }
+
+    .panel {
+      position: absolute;
+      z-index: 1000;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(92%, 430px);
+      padding: 12px 16px;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px #0003;
+      text-align: center;
+    }
+
+    .pin {
+      width: 28px;
+      height: 28px;
+      border: 3px solid #777;
+      border-radius: 50%;
+      background: #e5e5e5;
+      box-shadow: 0 1px 5px #0005;
+    }
+
+    .pin.done {
+      border-color: #16803c;
+      background: #22c55e;
+    }
+
+    .screen {
+      position: fixed;
+      z-index: 2000;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      padding: 24px;
+      background: white;
+      text-align: center;
+    }
+
+    .screen h1 {
+      font-size: clamp(2rem, 8vw, 3.5rem);
+      margin-bottom: 24px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 13px 22px;
+      font-size: 1rem;
+      background: #16803c;
+      color: white;
+      cursor: pointer;
+    }
+
+    input {
+      width: 100%;
+      padding: 12px;
+      margin: 12px 0;
+      font-size: 1rem;
+    }
+
+    .status {
+      min-height: 1.4em;
+      color: #555;
+    }
+  </style>
 </head>
+
 <body>
-  <h1>Gymkana ciudadana de Rivas</h1>
-  <p>Esta será la página de prueba del juego.</p>
+  <div id="map"></div>
+
+  <div class="panel">
+    <strong>Gymkana ciudadana de Rivas</strong>
+    <div id="progress">Ubicaciones completadas: 0 de 2</div>
+    <button id="locateButton">Comprobar mi ubicación</button>
+    <div id="gpsStatus" class="status"></div>
+  </div>
+
+  <div id="successScreen" class="screen">
+    <h1>¡Enhorabuena!</h1>
+    <button id="continueButton">Continuar</button>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    const RADIO_METROS = 10;
+
+    // Coordenadas aproximadas del IES Europa.
+    // Calle de la Música: sustituir por el punto exacto que elijáis.
+    const lugares = [
+      {
+        id: "ies",
+        nombre: "IES Europa",
+        lat: 40.3563831,
+        lng: -3.5288925,
+        pregunta: "¿Cómo se llama el instituto?",
+        respuesta: "europa"
+      },
+      {
+         id: "musica",
+        nombre: "Calle de la Música",
+        lat: 40.360490,
+        lng: -3.546053,
+        pregunta: "¿Cómo se llama esta calle?",
+        respuesta: "musica"
+      }
+    ];
+
+    const mapa = L.map("map").setView([40.3563831, -3.5288925], 14);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap'
+    }).addTo(mapa);
+
+    const completados = new Set();
+    const marcadores = {};
+    let lugarActivo = null;
+    let posicionUsuario = null;
+
+    const iconoGris = L.divIcon({
+      className: "",
+      html: '<div class="pin"></div>',
+      iconSize: [28, 28],
+      iconAnchor: [14, 14]
+    });
+
+    const iconoVerde = L.divIcon({
+      className: "",
+      html: '<div class="pin done"></div>',
+      iconSize: [28, 28],
+      iconAnchor: [14, 14]
+    });
+
+    lugares.forEach(lugar => {
+      const marcador = L.marker([lugar.lat, lugar.lng], {
+        icon: iconoGris
+      }).addTo(mapa);
+
+      marcador.bindPopup(`
+        <strong>${lugar.nombre}</strong><br>
+        <span id="popup-${lugar.id}">Acércate a este punto y comprueba tu ubicación.</span>
+      `);
+
+      marcadores[lugar.id] = marcador;
+    });
+
+    function distanciaMetros(lat1, lon1, lat2, lon2) {
+      const R = 6371000;
+      const rad = grados => grados * Math.PI / 180;
+      const dLat = rad(lat2 - lat1);
+      const dLon = rad(lon2 - lon1);
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(rad(lat1)) * Math.cos(rad(lat2)) *
+        Math.sin(dLon / 2) ** 2;
+
+      return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function actualizarProgreso() {
+      document.getElementById("progress").textContent =
+        `Ubicaciones completadas: ${completados.size} de ${lugares.length}`;
+    }
+
+    function comprobarUbicacion() {
+      const estado = document.getElementById("gpsStatus");
+
+      if (!navigator.geolocation) {
+        estado.textContent = "Este navegador no permite geolocalización.";
+        return;
+      }
+
+      estado.textContent = "Obteniendo ubicación…";
+
+      navigator.geolocation.getCurrentPosition(
+        posicion => {
+          posicionUsuario = {
+            lat: posicion.coords.latitude,
+            lng: posicion.coords.longitude,
+            precision: posicion.coords.accuracy
+          };
+
+          estado.textContent =
+            `Precisión GPS aproximada: ${Math.round(posicionUsuario.precision)} m`;
+
+          let encontrado = false;
+
+          lugares.forEach(lugar => {
+            const distancia = distanciaMetros(
+              posicionUsuario.lat,
+              posicionUsuario.lng,
+              lugar.lat,
+              lugar.lng
+            );
+
+            const dentro = distancia <= RADIO_METROS;
+
+            if (dentro && !completados.has(lugar.id)) {
+              lugarActivo = lugar;
+              encontrado = true;
+              mostrarPregunta(lugar);
+            }
+          });
+
+          if (!encontrado) {
+            estado.textContent +=
+              " Aún no estás a menos de 10 m de un punto pendiente.";
+          }
+        },
+        error => {
+          estado.textContent =
+            "No se pudo obtener la ubicación. Activa el GPS y permite el acceso.";
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 0,
+          timeout: 20000
+        }
+      );
+    }
+
+    function mostrarPregunta(lugar) {
+      const popup = marcadores[lugar.id].getPopup();
+      popup.setContent(`
+        <strong>${lugar.nombre}</strong>
+        <p>${lugar.pregunta}</p>
+        <input id="respuesta-${lugar.id}" type="text" autocomplete="off"
+               placeholder="Escribe tu respuesta">
+        <button onclick="validarRespuesta('${lugar.id}')">Responder</button>
+        <p id="mensaje-${lugar.id}"></p>
+      `);
+      marcadores[lugar.id].openPopup();
+    }
+
+    window.validarRespuesta = function(id) {
+      const lugar = lugares.find(item => item.id === id);
+      if (!lugar || lugarActivo?.id !== id || !posicionUsuario) return;
+
+      const distancia = distanciaMetros(
+        posicionUsuario.lat,
+        posicionUsuario.lng,
+        lugar.lat,
+        lugar.lng
+      );
+
+      if (distancia > RADIO_METROS) {
+        document.getElementById(`mensaje-${id}`).textContent =
+          "Debes estar a menos de 10 metros del punto para responder.";
+        return;
+      }
+
+      const entrada = document.getElementById(`respuesta-${id}`).value
+        .trim()
+        .toLocaleLowerCase("es")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+
+      if (entrada !== lugar.respuesta) {
+        document.getElementById(`mensaje-${id}`).textContent =
+          "Esa respuesta no es correcta. ¡Inténtalo de nuevo!";
+        return;
+      }
+
+      completados.add(id);
+      marcadores[id].setIcon(iconoVerde);
+      actualizarProgreso();
+      lugarActivo = null;
+
+      document.getElementById("successScreen").style.display = "flex";
+    };
+
+    document.getElementById("locateButton")
+      .addEventListener("click", comprobarUbicacion);
+
+    document.getElementById("continueButton").addEventListener("click", () => {
+      document.getElementById("successScreen").style.display = "none";
+      mapa.closePopup();
+    });
+  </script>
 </body>
 </html>
