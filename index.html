@@ -112,7 +112,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
-    const RADIO_METROS = 10;
+    const RADIO_METROS = 15;
 
     // Coordenadas aproximadas del IES Europa.
     // Calle de la Música: sustituir por el punto exacto que elijáis.
@@ -234,7 +234,7 @@
 
           if (!encontrado) {
             estado.textContent +=
-              " Aún no estás a menos de 10 m de un punto pendiente.";
+              " Aún no estás a menos de 15 m de un punto pendiente.";
           }
         },
         error => {
@@ -275,7 +275,7 @@
 
       if (distancia > RADIO_METROS) {
         document.getElementById(`mensaje-${id}`).textContent =
-          "Debes estar a menos de 10 metros del punto para responder.";
+          "Debes estar a menos de 15 metros del punto para responder.";
         return;
       }
 
